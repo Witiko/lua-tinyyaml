@@ -7,7 +7,7 @@ local string = string
 local schar = string.char
 local ssub, gsub = string.sub, string.gsub
 local sfind, smatch = string.find, string.match
-local tinsert, tremove = table.insert, table.remove
+local tinsert, tconcat, tremove = table.insert, table.concat, table.remove
 local setmetatable = setmetatable
 local pairs = pairs
 local type = type
@@ -46,6 +46,10 @@ end
 
 local function rtrim(str)
   return smatch(str, "^(.-)%s*$")
+end
+
+local function trim(str)
+  return smatch(str, "^%s*(.-)%s*$")
 end
 
 -------------------------------------------------------------------------------
@@ -190,7 +194,7 @@ local function parsestring(line, stopper)
     return nil, line
   end
   if q == '-' or q == ':' then
-    if ssub(line, 2, 2) == ' ' or #line == 1 then
+    if ssub(line, 2, 2) == ' ' or ssub(line, 2, 2) == '\n' or #line == 1 then
       return nil, line
     end
   end
@@ -199,7 +203,7 @@ local function parsestring(line, stopper)
     local c = ssub(line, 1, 1)
     if sfind(stopper, c, 1, true) then
       break
-    elseif c == ':' and (ssub(line, 2, 2) == ' ' or #line == 1) then
+    elseif c == ':' and (ssub(line, 2, 2) == ' ' or ssub(line, 2, 2) == '\n' or #line == 1) then
       break
     elseif c == '#' and (ssub(buf, #buf, #buf) == ' ') then
       break
@@ -217,6 +221,29 @@ end
 
 local function equalsline(line, needle)
   return startswith(line, needle) and isemptyline(ssub(line, #needle+1))
+end
+
+local function compactifyemptylines(lines)
+  -- Appends empty lines as "\n" to the end of the nearest preceding non-empty line
+  local compactified = {}
+  local lastline = {}
+  for i = 1, #lines do
+    local line = lines[i]
+    if isemptyline(line) then
+      if #compactified > 0 and i < #lines then
+        tinsert(lastline, "\n")
+      end
+    else
+      if #lastline > 0 then
+        tinsert(compactified, tconcat(lastline, ""))
+      end
+      lastline = {line}
+    end
+  end
+  if #lastline > 0 then
+    tinsert(compactified, tconcat(lastline, ""))
+  end
+  return compactified
 end
 
 local function checkdupekey(map, key)
@@ -353,13 +380,8 @@ local function parseblockstylestring(line, lines, indent)
   else
     error('invalid blockstyle string:'..line)
   end
-  local eonl = 0
-  for i = #s, 1, -1 do
-    if s[i] == '' then
-      tremove(s, i)
-      eonl = eonl + 1
-    end
-  end
+  local _, eonl = s[#s]:gsub('\n', '\n')
+  s[#s] = rtrim(s[#s])
   if striptrailing then
     eonl = 0
   end
@@ -369,7 +391,7 @@ local function parseblockstylestring(line, lines, indent)
   for i = endline, 1, -1 do
     tremove(lines, i)
   end
-  return table.concat(s, sep)..string.rep('\n', eonl)
+  return tconcat(s, sep)..string.rep('\n', eonl)
 end
 
 local function parsetimestamp(line)
@@ -412,7 +434,7 @@ local function parsetimestamp(line)
 end
 
 local function parsescalar(line, lines, indent)
-  line = ltrim(line)
+  line = trim(line)
   line = gsub(line, '^%s*#.*$', '')  -- comment only -> ''
   line = gsub(line, '^%s*', '')  -- trim head spaces
 
@@ -716,7 +738,7 @@ end
 
 -- : (list<str>)->dict
 local function parsedocuments(lines)
-  lines = select(lines, function(s) return not isemptyline(s) end)
+  lines = compactifyemptylines(lines)
 
   if sfind(lines[1], '^%%YAML') then tremove(lines, 1) end
 
